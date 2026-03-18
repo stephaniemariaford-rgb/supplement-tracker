@@ -1,13 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function getUserId() {
-  let id = localStorage.getItem("rosette_uid");
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem("rosette_uid", id); }
-  return id;
-}
-
 // ── Supplement Database ──────────────────────────────────────────────────────
 const SUPPLEMENT_DB = [
   { name: "Magnesium Glycinate", category: "Minerals", typicalDose: "200–400mg", doseOptions: ["200mg","400mg"], notes: "Evening — supports sleep & muscle relaxation" },
@@ -226,10 +219,45 @@ export default function App() {
   const [dbQuery, setDbQuery] = useState("");
   const [dbCategory, setDbCategory] = useState("All");
 
-  const uid = getUserId();
+  // ── Auth state ──
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [email, setEmail] = useState("");
+  const [magicSent, setMagicSent] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthChecked(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const uid = session?.user?.id;
+
+  async function sendMagicLink() {
+    if (!email.trim()) return;
+    setAuthLoading(true);
+    await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.href }
+    });
+    setMagicSent(true);
+    setAuthLoading(false);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setSupplements([]); setMoodLogs([]); setSuppHistory([]); setLoaded(false);
+  }
 
   // ── Load from Supabase ──
   useEffect(() => {
+    if (!uid) return;
     async function load() {
       const [{ data: supps }, { data: moods }, { data: hist }] = await Promise.all([
         supabase.from("supplements").select("*").eq("user_id", uid).order("id"),
@@ -242,7 +270,7 @@ export default function App() {
       setLoaded(true);
     }
     load();
-  }, []);
+  }, [uid]);
 
   // ── Actions ──
   async function addSupplement() {
@@ -382,6 +410,46 @@ export default function App() {
       &&(dbCategory==="All"||s.category===dbCategory);
   });
 
+  if (!authChecked) return (
+    <div style={{ minHeight:"100vh", background:"#fdf4f7", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ fontFamily:"'Cormorant Garamond', serif", fontSize:22, fontStyle:"italic", color:"#b07a90" }}>Loading…</div>
+    </div>
+  );
+
+  // ── Login screen ──
+  if (!session) return (
+    <div style={{ minHeight:"100vh", background:"linear-gradient(145deg,#fdf4f7,#fce8ef)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
+      <div style={{ width:"100%", maxWidth:380, textAlign:"center" }}>
+        <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:42, fontWeight:500, color:"#3d1a28", letterSpacing:"-0.01em", marginBottom:8 }}>Rosette</h1>
+        <p style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:"#b07a90", letterSpacing:"0.14em", marginBottom:40 }}>WELLNESS & SUPPLEMENT JOURNAL</p>
+        <div style={{ height:1, background:"linear-gradient(90deg,transparent,#d6477e,transparent)", marginBottom:40 }} />
+        {!magicSent ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:18, fontStyle:"italic", color:"#7a4058", marginBottom:4 }}>Sign in to sync across all your devices</p>
+            <input
+              type="email" placeholder="your@email.com" value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key==="Enter" && sendMagicLink()}
+              style={{ background:"#fff", border:"1px solid #f0d0dc", borderRadius:8, padding:"12px 16px", color:"#3d1a28", fontFamily:"'DM Sans',sans-serif", fontSize:14, outline:"none", textAlign:"center" }}
+            />
+            <button onClick={sendMagicLink} disabled={authLoading||!email.trim()} style={{ background:"#d6477e", color:"#fff", border:"none", borderRadius:8, padding:"13px 24px", fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:600, cursor:"pointer", opacity:authLoading||!email.trim()?0.4:1, boxShadow:"0 3px 14px rgba(214,71,126,0.28)" }}>
+              {authLoading ? "Sending…" : "Send magic link"}
+            </button>
+            <p style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:"#b07a90", letterSpacing:"0.06em", lineHeight:1.7 }}>No password needed. We'll email you a link — tap it and you're in.</p>
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:16, alignItems:"center" }}>
+            <div style={{ fontSize:40 }}>📩</div>
+            <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:22, fontStyle:"italic", color:"#3d1a28" }}>Check your email</p>
+            <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#7a4058", lineHeight:1.6 }}>We sent a magic link to <strong>{email}</strong>.<br/>Tap it to sign in — no password needed.</p>
+            <button onClick={() => { setMagicSent(false); setEmail(""); }} style={{ background:"transparent", border:"1px solid #f0d0dc", borderRadius:8, padding:"10px 20px", fontFamily:"'DM Mono',monospace", fontSize:11, color:"#b07a90", cursor:"pointer", letterSpacing:"0.06em" }}>Use a different email</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   if (!loaded) return (
     <div style={{ minHeight:"100vh", background:"#fdf4f7", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ fontFamily:"'Cormorant Garamond', serif", fontSize:22, fontStyle:"italic", color:"#b07a90" }}>Loading…</div>
@@ -443,6 +511,7 @@ export default function App() {
           <div style={{ display:"flex", gap:8 }}>
             <button className="btn-sm" onClick={() => setModal("database")}>DATABASE</button>
             <button onClick={() => setModal("mood")} style={{ background:"var(--pink)", color:"#fff", border:"none", borderRadius:8, padding:"8px 16px", fontSize:11, fontFamily:"var(--mono)", fontWeight:500, letterSpacing:"0.07em", cursor:"pointer", boxShadow:"0 3px 12px rgba(214,71,126,.25)" }}>LOG MOOD</button>
+            <button className="btn-sm" onClick={signOut} title={`Signed in as ${session.user.email}`}>SIGN OUT</button>
           </div>
         </div>
         <div style={{ height:1, background:"linear-gradient(90deg,var(--pink) 0%,transparent 55%)", marginTop:20 }} />
@@ -818,4 +887,3 @@ export default function App() {
     </div>
   );
 }
-
