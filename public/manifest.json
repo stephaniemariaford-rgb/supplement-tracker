@@ -1,0 +1,16 @@
+{
+  "name": "Rosette",
+  "short_name": "Rosette",
+  "description": "Wellness & Supplement Journal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fdf4f7",
+  "theme_color": "#d6477e",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
